@@ -46,13 +46,13 @@ If someone gets this from GitHub and wants `sentinelrag` to work from anywhere o
 ```bash
 pip install pipx
 pipx ensurepath
-pipx install git+https://github.com/<your-user>/<your-repo>.git
+pipx install git+https://github.com/CODExGAMERZ/SentinelRAG.git
 ```
 
 If they already cloned the repo:
 
 ```bash
-cd <your-repo>
+cd SentinelRAG
 pipx install .
 ```
 
