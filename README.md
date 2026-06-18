@@ -3,6 +3,7 @@
 [![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Local First](https://img.shields.io/badge/architecture-local--first-green.svg)](#)
 [![Ollama Supported](https://img.shields.io/badge/ollama-supported-orange.svg)](https://ollama.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **SentinelRAG** is a high-performance, local-first Retrieval-Augmented Generation (RAG) CLI tool designed to search your local files and answer queries about them with complete privacy. 
 
@@ -257,3 +258,9 @@ To verify code syntax and compile the python files:
 ```bash
 python -m compileall src
 ```
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
