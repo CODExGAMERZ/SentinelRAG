@@ -1,262 +1,171 @@
 # 🛡️ SentinelRAG
 
-[![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
-[![Local First](https://img.shields.io/badge/architecture-local--first-green.svg)](#)
-[![Ollama Supported](https://img.shields.io/badge/ollama-supported-orange.svg)](https://ollama.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<div align="center">
 
-**SentinelRAG** is a high-performance, local-first Retrieval-Augmented Generation (RAG) CLI tool designed to search your local files and answer queries about them with complete privacy. 
+**A High-Performance, Privacy-First, Local-First Hybrid RAG Engine for Obsidian Markdown Vaults**
 
-It is engineered to run seamlessly on consumer-grade hardware. It uses a lightweight embedded database tier, local token hashing and cosine similarity for vector indexing, and integrates directly with **Ollama** for local LLM generation. When Ollama is offline, it gracefully falls back to a cited extractive answer mode to prevent service failure.
+[![Python Version](https://img.shields.io/badge/python-3.12%2B-blue.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Local First](https://img.shields.io/badge/architecture-local--first-green.svg?style=for-the-badge&logo=arch-linux&logoColor=white)](#)
+[![Ollama Supported](https://img.shields.io/badge/ollama-supported-orange.svg?style=for-the-badge&logo=ollama&logoColor=white)](https://ollama.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
-SentinelRAG was created by **CODExGAMERZ (Aryan)**.
+</div>
+
+---
+
+## 📖 Introduction
+
+**SentinelRAG** is a production-grade, local-first Retrieval-Augmented Generation (RAG) system engineered to turn your local **Obsidian Markdown Vault** into a private, highly-contextualized knowledge base. 
+
+Operating with absolute privacy (zero telemetry or cloud leaks), SentinelRAG employs a **hybrid retrieval strategy** combining semantic vector matching (Qdrant Local) with graph-theoretic structural analysis (SQLite Graph Store). It dynamically adjusts its reasoning workload using **hardware-adaptive LangGraph topologies** to ensure optimal performance, whether running on a low-end laptop or a multi-GPU workstation.
+
+---
+
+## 🎯 Architecture Overview
+
+```mermaid
+graph TD
+    %% Ingestion Pipeline
+    subgraph Ingestion ["1. INGESTION PIPELINE"]
+        Vault[Obsidian Vault] --> Watcher[VaultWatcher / Watchdog]
+        Watcher -->|Debounced Event| Parser[3-Tier Parser]
+        Parser -->|Blocks, Links, Tags| GraphStore[SQLite Graph Store]
+        Parser -->|Text Chunks| VecStore[Qdrant Local Disk]
+    end
+
+    %% Query Reasoning Pipeline
+    subgraph QueryPipeline ["2. HYBRID QUERY ENGINE"]
+        UserQ[User Question] --> Classifier[Query Classifier]
+        
+        Classifier -->|Semantic Query| QdrantSearch[Qdrant Vector Search]
+        Classifier -->|Structural/Graph Query| SQLiteGraph[SQLite Graph Centrality]
+        
+        QdrantSearch -->|Vector Hits| Merger[Evidence Merger / RRF Blending]
+        SQLiteGraph -->|Graph Hits| Merger
+        
+        Merger -->|Citations & Blended Evidence| LangGraph[Tier-Adaptive LangGraph Agent]
+        LangGraph -->|Ollama Local Inference| Output[Grounded Cited Answer]
+    end
+```
 
 ---
 
 ## ✨ Features
 
-- 📁 **Multi-format Ingestion**: Indexes `.md`, `.txt`, `.csv`, `.html`, `.htm`, and optional `.pdf` files.
-- ⚡ **Extremely Lightweight**: Operates with zero background daemons or Docker container dependencies.
-- 🧠 **Hybrid Search Context**: Complements semantic vector matching with lightweight entity-style graph relationship context.
-- ⚙️ **Hardware-Adaptive Profiling**: Automatically detects CPU cores, RAM, and available GPU constraints to recommend the best local model profile and thread concurrency settings.
-- 🚀 **Ollama Helper CLI**: Checks for local Ollama installations, writes configuration defaults, and pulls recommended models directly from the command line.
-- 🔍 **Device-Wide Scanning**: Recursively indexes entire directories or common user folders (Desktop, Documents, GitHub, etc.) while automatically skipping system noise, caches, venvs, and sensitive credential files.
-- 💬 **Grounded Answers**: Always generates responses backed by local file citations and relevance scores.
+* 📁 **Deep Obsidian Integration**: Specially designed to parse Wikilinks (`[[NoteName]]`), tags (`#tag`), structural headers (`#` to `######`), list structures, and code fences block-by-block.
+* ⚡ **Zero-Dependency Core**: Installs as a lightweight Python package with zero Docker container requirements or heavy external database setups.
+* 🧬 **Tier-Adaptive Topologies (LangGraph)**:
+  * **Tier A (High-End GPU)**: Activates full Planner, Retriever, Merger, separate Validator and Critic, and Synthesizer nodes.
+  * **Tier B (Mid-Range)**: Coalesces Validator/Critic nodes into a combined pass to conserve memory.
+  * **Tier C (Low-End/CPU)**: Streamlines execution into a linear Retriever -> Merger -> Synthesizer pipe.
+* 🔄 **Debounced Real-Time Watcher**: Incremental file updates, renames, deletions, and creations are automatically processed with a thread-safe 500ms debouncing watchdog handler.
+* 🔀 **RRF Blended Retrieval**: Fuses vector similarities with document-level eigenvector centrality scores (incorporating page decay) using **Reciprocal Rank Fusion (RRF)**.
+* 🛡️ **Extractive Fallback**: If the local Ollama instance is offline or unreachable, the system automatically runs in a cited extractive fallback mode, supplying direct source passages to guarantee continuity.
 
 ---
 
-## 🛠️ Installation
+## 🚀 Installation & Quick Start
 
-### Option 1: Global CLI Install via `pipx` (Recommended)
+### 1. Prerequisites
+- Python `>=3.12` (Tested up to Python 3.14)
+- **Ollama** installed locally (Optional, but required for generative synthesis)
 
-To run `sentinelrag` globally from any terminal on your system, install it using `pipx`:
-
-```bash
-# Install pipx if you don't have it
-pip install pipx
-pipx ensurepath
-
-# Install SentinelRAG directly from the GitHub repository
-pipx install git+https://github.com/CODExGAMERZ/SentinelRAG.git
-```
-
-> [!NOTE]
-> **Windows Environment Variables**: If the command is not recognized after installation, ensure that the Python user Scripts directory is added to your system `PATH`.
-> Typical path: `%APPDATA%\Python\Python314\Scripts` (or equivalent for your Python version).
-
----
-
-### Option 2: Local Development Install
-
-Clone the repository and install it in editable mode:
+### 2. Installation
+Clone the repository and install using `uv` (recommended) or `pip`:
 
 ```bash
 git clone https://github.com/CODExGAMERZ/SentinelRAG.git
 cd SentinelRAG
-python -m pip install -e .
+uv pip install -e .
 ```
 
-#### Install Optional Dependency Extras:
+### 3. Basic Usage Flow
+Initialize settings, ingest your Markdown vault, and run a query:
 
 ```bash
-# For development dependencies (pytest)
-python -m pip install -e ".[dev]"
+# 1. Profile hardware and generate default configuration
+uv run sentinelrag profile
 
-# For PDF ingestion support
-python -m pip install -e ".[pdf]"
+# 2. Setup Ollama (downloads client if missing and pulls model)
+uv run sentinelrag setup-ollama --install --pull-model
 
-# For advanced optional dependencies (Qdrant Edge, FalkorDBLite, nvidia-ml-py)
-python -m pip install -e ".[edge]"
-```
+# 3. Ingest your vault directory (e.g. storage_vault)
+uv run sentinelrag ingest storage_vault --reset
 
----
-
-## 🚀 Quick Start Guide
-
-If you are running from the cloned repository without a global installation:
-
-```powershell
-# Windows PowerShell example
-$env:PYTHONPATH='src'
-python -m sentinelrag profile
-python -m sentinelrag setup-ollama
-python -m sentinelrag ingest README.md --reset
-python -m sentinelrag ask "What does this project say about hardware profiling?"
-```
-
-If you installed the package globally:
-
-```bash
-sentinelrag profile
-sentinelrag setup-ollama
-sentinelrag index-pc --dry-run
-sentinelrag ask "What does SentinelRAG do?"
+# 4. Ask a question
+uv run sentinelrag ask "What is Qwen3?"
 ```
 
 ---
 
 ## 💻 Command Reference
 
-### `sentinelrag profile`
-Profiles your local machine's system resources and calculates optimal model parameters.
-- Inspects operating system, CPU cores, total RAM, and disk space.
-- Detects GPU hardware availability (such as NVIDIA GeForce/RTX cards) and sets safe VRAM model allocation budgets.
-- Recommends the corresponding hardware tier, Ollama model name, context size (`num_ctx`), and `OLLAMA_NUM_PARALLEL` concurrency limits.
-
----
-
-### `sentinelrag setup-ollama`
-Sets up and configures the connection to your local Ollama instance.
-- Detects whether Ollama is installed and running on your system.
-- Recommends a model size based on hardware:
-  - **Low/Entry Tier**: `qwen2.5:3b`
-  - **Mid-Range Tier**: `qwen2.5:7b`
-  - **High-End Tier**: `qwen2.5:14b`
-- Updates the local configuration file and automatically pulls the model if specified.
-
-**Examples:**
+### `profile`
+Profiles CPU cores, RAM, and GPU capacity to write hardware-adaptive configurations.
 ```bash
-# Inspect status and recommend settings
-sentinelrag setup-ollama
+uv run sentinelrag profile --json
+```
 
-# Install Ollama if missing
-sentinelrag setup-ollama --install
+### `setup-ollama`
+Checks for, installs, and configures Ollama connections.
+```bash
+# Automatically install Ollama and pull the recommended model
+uv run sentinelrag setup-ollama --install --pull-model
+```
 
-# Install Ollama and pull the recommended model automatically
-sentinelrag setup-ollama --install --pull-model
+### `ingest`
+Indexes a local directory containing Markdown files.
+```bash
+# Ingest with incremental watch mode enabled
+uv run sentinelrag ingest path/to/vault --watch
 
-# Specify a custom model and pull it
-sentinelrag setup-ollama --model qwen2.5:7b --pull-model
+# Force rebuild/re-indexing of all files (ignoring modification times)
+uv run sentinelrag ingest path/to/vault --force
+```
+
+### `ask`
+Performs queries against your local collection.
+```bash
+# Query the default namespace collection and print citations
+uv run sentinelrag ask "What is SentinelRAG?"
+
+# Return structured JSON output for API integrations
+uv run sentinelrag ask "What is SentinelRAG?" --json --top-k 5
+```
+
+### `doctor`
+Displays diagnostic outputs for all parts of the system.
+```bash
+uv run sentinelrag doctor
 ```
 
 ---
 
-### `sentinelrag ingest`
-Reads and chunks files or directories to index them into your local storage.
+## 💾 Storage Schema & Internals
+
+All persistent files are located in:
+* **Windows**: `%LOCALAPPDATA%\SentinelRAG` (e.g., `C:\Users\<Name>\AppData\Local\SentinelRAG`)
+* **macOS/Linux**: `~/.sentinelrag`
+
+### 1. SQLite Relational Store (`sentinelrag.db`)
+Maintains structural relations, metadata, and extracted entities.
+* `nodes`: Vault note path, title, modification time (`mtime`), and evergreen flags.
+* `blocks`: Individual parsed content blocks, content hashes, header context, and tags.
+* `edges`: Directed linkages between files (`source` to `target`) representing Wikilinks.
+* `triples`: Extracted Subject-Predicate-Object (SPO) relationships representing semantic associations.
+
+### 2. Qdrant Vector Store (`/qdrant/`)
+Contains localized Qdrant databases for high-speed dense vector matching.
+* Points are identified deterministically using `uuid.uuid5` generated from block-level IDs to ensure idempotent updates.
+
+---
+
+## 🧪 Testing
+
+To run the complete test suite (containing 20 unit and stress tests covering watchers, link disambiguation, RRF blending, and lock contention):
 
 ```bash
-# Ingest a folder
-sentinelrag ingest ./docs
-
-# Ingest a specific file and clear previous indexes for that file
-sentinelrag ingest README.md --reset
-
-# Ingest into a specific namespace collection
-sentinelrag ingest ./docs --collection research
-```
-
-Supported extensions: `.md`, `.txt`, `.csv`, `.html`, `.htm`, `.pdf` (with `pypdf` installed), and `.env` (only if explicitly pointed to).
-
----
-
-### `sentinelrag index-pc`
-Automatically scans and indexes supported files from common user folders to build a personal knowledge base across your device.
-- **Scanned Paths**: Desktop, Documents, Downloads, GitHub, OneDrive, Pictures, Videos, and the User Home directory.
-- **Default Skips**: System directories, temporary caches, virtual environments (`.venv`), `node_modules`, folders over 25 MB, and files containing potential secrets (`.env`, `token`, `password`, `key`, etc.).
-
-```bash
-# Preview what files would be scanned without indexing
-sentinelrag index-pc --dry-run
-
-# Start a full PC indexing run, resetting any previous index
-sentinelrag index-pc --reset
-
-# Limit the scan to a custom root directory
-sentinelrag index-pc --root ~/Documents --root ~/GitHub
-
-# Include files that might contain sensitive keywords or configurations
-sentinelrag index-pc --include-sensitive
-```
-
----
-
-### `sentinelrag ask`
-Queries the indexed vector and graph stores.
-
-```bash
-# Ask a general question
-sentinelrag ask "What does this project say about hardware profiling?"
-
-# Ask with a custom retrieval depth
-sentinelrag ask "What is the storage strategy?" --top-k 5
-
-# Ask inside a custom collection and return raw JSON outputs
-sentinelrag ask "What is the storage strategy?" --collection research --json
-```
-
-> [!TIP]
-> **Extractive Fallback**: If Ollama is offline or unavailable, SentinelRAG automatically enters extractive fallback mode, returning direct cited text segments matching the query instead of throwing an error.
-
----
-
-### `sentinelrag doctor`
-Diagnostic utility displaying the health and location of all system components.
-- Logs the shared global application storage paths.
-- Verifies the state of config files and checks which optional dependencies (`qdrant-edge-py`, `falkordblite`, `graphiti`, `langgraph`, `nvidia-ml-py`) are available.
-- Reports indexed item counts (total chunks and graph facts).
-- Displays Ollama connection status, server version, and installed model lists.
-
-```bash
-# Print diagnostic summary
-sentinelrag doctor
-
-# Print diagnostics in JSON format for scripting
-sentinelrag doctor --json
-```
-
----
-
-## 💾 Storage & Configuration
-
-### Storage Location
-To make the CLI accessible from any directory, SentinelRAG uses a shared global directory rather than writing index files inside your active folder:
-- **Windows**: `%LOCALAPPDATA%\SentinelRAG`
-- **macOS/Linux**: `~/.sentinelrag`
-
-> [!TIP]
-> You can override the default location by setting the `SENTINELRAG_HOME` environment variable:
-> `SENTINELRAG_HOME=/custom/path sentinelrag doctor`
-
-### Config Format
-A `config.json` file is automatically created in your storage directory:
-```json
-{
-  "model": {
-    "provider": "ollama",
-    "name": "auto",
-    "num_ctx": 4096,
-    "num_parallel": 1
-  },
-  "storage": {
-    "base_dir": "auto",
-    "collection": "default"
-  },
-  "retrieval": {
-    "top_k": 8,
-    "graph_expansion_depth": 1
-  }
-}
-```
-
----
-
-## 🔍 How it Works Under the Hood
-
-1. **Document Parsing**: Files are parsed, cleaned, and split into smaller chunks.
-2. **Deterministic Embeddings**: Text chunks are embedded locally using a lightweight in-process vectorizer.
-3. **In-Process Vector Store**: Chunk coordinates and source metadata are written atomically to a local JSON-backed database.
-4. **Lightweight Graph Memory**: Important capitalized entities and cross-mentions are extracted and organized into a local JSON relation graph.
-5. **Context Augmentation**: The `ask` command performs a hybrid search, fetching matching vector chunks and expanding structural entities.
-6. **Inference Execution**: If Ollama is reachable, the query and context are dispatched to the local LLM. If offline, the extractive matching engine presents the most relevant passages directly.
-
----
-
-## 🛠️ Verification & Checks
-
-To verify code syntax and compile the python files:
-
-```bash
-python -m compileall src
+uv run pytest
 ```
 
 ---

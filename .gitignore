@@ -50,3 +50,11 @@ data/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Project-specific caches and scratch dirs
+.pytest_cache/
+scratch/
+.agents/
+.gemini/
+.obsidian/
+

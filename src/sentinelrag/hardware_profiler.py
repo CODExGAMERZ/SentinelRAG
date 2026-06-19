@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import json
 import os
 import platform
 import shutil
@@ -30,7 +28,7 @@ class HardwareProfile:
     free_ram_gb: float
     disk_free_gb: float
     gpus: list[GpuInfo]
-    apple_mps: bool
+    apple_unified_memory_gb: float | None
     rocm: bool
     recommended_tier: str
     recommended_model: str
@@ -39,6 +37,8 @@ class HardwareProfile:
     num_ctx: int
     ollama_num_parallel: int
     safe_model_budget_gb: float
+    agent_topology: str
+    allow_concurrent_llm: bool
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -121,33 +121,43 @@ def _rocm_available() -> bool:
         return False
 
 
-def _apple_mps_available() -> bool:
-    return platform.system() == "Darwin" and platform.machine().lower() in {"arm64", "aarch64"}
+def _apple_unified_memory_gb() -> float | None:
+    if platform.system() != "Darwin" or platform.machine().lower() not in {"arm64", "aarch64"}:
+        return None
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        return round(int(result.stdout.strip()) / BYTES_PER_GB, 2)
+    except Exception:
+        return None
 
 
-def _allowed_formats(has_nvidia: bool, apple_mps: bool) -> list[str]:
-    if apple_mps or not has_nvidia:
+def _allowed_formats(has_nvidia: bool, has_apple_unified_memory: bool) -> list[str]:
+    if has_apple_unified_memory or not has_nvidia:
         return ["GGUF"]
-    if platform.system() == "Linux" and has_nvidia:
-        return ["GGUF", "AWQ", "GPTQ"]
-    return ["GGUF"]
+    return ["GGUF", "AWQ", "GPTQ"]
 
 
-def _recommend(total_ram_gb: float, free_ram_gb: float, max_vram_gb: float) -> tuple[str, str, str, int, int, float]:
+def _classify_tier(total_ram_gb: float, free_ram_gb: float, max_vram_gb: float, apple_unified_memory_gb: float | None) -> tuple[str, str, str, int, int, float, str, bool]:
     reserved_os = max(2.0, total_ram_gb * 0.2)
-    framework_overhead = 0.5
+    framework_overhead = 0.75
     usable_ram = max(0.5, free_ram_gb - reserved_os - framework_overhead)
     accelerator_budget = max_vram_gb * 0.85 if max_vram_gb else 0.0
     safe_budget = max(usable_ram, accelerator_budget)
 
-    if total_ram_gb < 8 and max_vram_gb < 4:
-        return "low", "1B-3B GGUF (Phi-3 Mini or Qwen2.5 3B)", "qwen2.5:3b", 2048, 1, round(safe_budget, 2)
-    if total_ram_gb < 16 and max_vram_gb < 6:
-        return "entry", "3B-4B GGUF", "qwen2.5:3b", 4096, 1, round(safe_budget, 2)
-    if total_ram_gb < 32 and max_vram_gb < 12:
+    if max_vram_gb >= 12 or (apple_unified_memory_gb or 0.0) >= 32:
+        return "A", "14B-30B quantized or MoE", "qwen2.5:14b", 8192, 2, round(safe_budget, 2), "full", True
+    if max_vram_gb >= 6 or total_ram_gb >= 16 or 16 <= (apple_unified_memory_gb or 0.0) < 32:
         parallel = 2 if safe_budget >= 10 else 1
-        return "mid", "7B-14B GGUF/quantized", "qwen2.5:7b", 8192, parallel, round(safe_budget, 2)
-    return "high", "14B-30B quantized or MoE", "qwen2.5:14b", 8192, 2, round(safe_budget, 2)
+        return "B", "7B-14B quantized", "qwen2.5:7b", 8192, parallel, round(safe_budget, 2), "collapsed", False
+    return "C", "1B-4B GGUF", "qwen2.5:3b", 4096, 1, round(safe_budget, 2), "minimal", False
 
 
 def detect_hardware(cwd: Path | None = None) -> HardwareProfile:
@@ -155,10 +165,14 @@ def detect_hardware(cwd: Path | None = None) -> HardwareProfile:
     disk = shutil.disk_usage(cwd or Path.cwd())
     gpus = _nvidia_gpus()
     rocm = _rocm_available()
-    apple_mps = _apple_mps_available()
+    apple_unified_memory_gb = _apple_unified_memory_gb()
     max_vram = max((gpu.free_gb or 0.0 for gpu in gpus), default=0.0)
-    tier, model, ollama_model, num_ctx, parallel, budget = _recommend(total_ram, free_ram, max_vram)
-
+    tier, model, ollama_model, num_ctx, parallel, budget, topology, concurrent_llm = _classify_tier(
+        total_ram,
+        free_ram,
+        max_vram,
+        apple_unified_memory_gb,
+    )
     return HardwareProfile(
         os=platform.system(),
         machine=platform.machine(),
@@ -167,17 +181,15 @@ def detect_hardware(cwd: Path | None = None) -> HardwareProfile:
         free_ram_gb=round(free_ram, 2),
         disk_free_gb=round(disk.free / BYTES_PER_GB, 2),
         gpus=gpus,
-        apple_mps=apple_mps,
+        apple_unified_memory_gb=apple_unified_memory_gb,
         rocm=rocm,
         recommended_tier=tier,
         recommended_model=model,
         recommended_ollama_model=ollama_model,
-        allowed_formats=_allowed_formats(any(g.vendor == "nvidia" for g in gpus), apple_mps),
+        allowed_formats=_allowed_formats(any(g.vendor == "nvidia" for g in gpus), apple_unified_memory_gb is not None),
         num_ctx=num_ctx,
         ollama_num_parallel=parallel,
         safe_model_budget_gb=budget,
+        agent_topology=topology,
+        allow_concurrent_llm=concurrent_llm,
     )
-
-
-def profile_json(profile: HardwareProfile) -> str:
-    return json.dumps(profile.to_dict(), indent=2)

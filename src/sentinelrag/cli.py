@@ -5,33 +5,50 @@ import importlib.util
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 
+from .agents.workflow import select_workflow_topology
+from .api import run_api_server
 from .config import ensure_app_dirs, load_config, save_config
-from .hardware import detect_hardware, profile_json
-from .ingest import discover_files, make_chunks
+from .graph.graph_store import GraphStore
+from .hardware_profiler import detect_hardware
 from .llm import ensure_ollama_installed, ollama_install_plan, ollama_status, pull_ollama_model
-from .pcscan import default_pc_roots, discover_pc_files, iter_pc_files
+from .obsidian.parser import probe_parser_tier
+from .obsidian.watcher import VaultWatcher
 from .paths import validate_collection_name
 from .rag import ask_question, format_answer, result_json
-from .storage import GraphMemory, VectorStore
+from .storage.vector_store import VectorStore
 
 
 def configure_logging(verbose: bool) -> None:
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
-        format="%(levelname)s %(message)s",
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
     )
 
 
 def cmd_profile(args: argparse.Namespace) -> int:
     config = load_config()
     profile = detect_hardware()
+    parser_probe = probe_parser_tier()
+    topology = select_workflow_topology(profile.recommended_tier)
     config.model.num_ctx = profile.num_ctx
     config.model.num_parallel = profile.ollama_num_parallel
+    config.hardware.tier = profile.recommended_tier
+    config.hardware.workflow_topology = profile.agent_topology
+    config.hardware.allow_concurrent_llm = profile.allow_concurrent_llm
+    config.hardware.parser_locked_tier = parser_probe.tier
+    config.retrieval.parser_tier = parser_probe.tier
     save_config(config)
+    
     if args.json:
-        print(profile_json(profile))
+        payload = profile.to_dict()
+        payload["parser_tier"] = parser_probe.tier
+        payload["parser_engine"] = parser_probe.engine
+        payload["workflow_nodes"] = list(topology.nodes)
+        print(json.dumps(payload, indent=2))
     else:
         print(f"OS: {profile.os} {profile.machine}")
         print(f"CPU cores: {profile.cpu_cores}")
@@ -44,145 +61,57 @@ def cmd_profile(args: argparse.Namespace) -> int:
         print(f"Allowed formats: {', '.join(profile.allowed_formats)}")
         print(f"num_ctx: {profile.num_ctx}")
         print(f"OLLAMA_NUM_PARALLEL: {profile.ollama_num_parallel}")
+        print(f"Parser tier: {parser_probe.tier} ({parser_probe.engine})")
+        print(f"Workflow topology: {' -> '.join(topology.nodes)}")
     return 0
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
+    vault_path = Path(args.path)
+    if not vault_path.exists():
+        print(f"Error: path '{args.path}' does not exist.", file=sys.stderr)
+        return 1
+
     config = load_config()
     collection = validate_collection_name(args.collection or config.storage.collection)
     base = ensure_app_dirs(config)
+    
     vector_store = VectorStore(base, collection)
-    graph = GraphMemory(base, collection)
-    if args.reset:
-        vector_store.reset()
-        graph.reset()
+    graph_store = GraphStore(base, config.storage.sqlite_filename)
+    
+    try:
+        if args.reset:
+            vector_store.reset()
+            graph_store.reset()
 
-    files = discover_files(Path(args.path))
-    if not files:
-        print("No supported files found.", file=sys.stderr)
-        return 1
-
-    total_chunks = 0
-    failures: list[str] = []
-    for file in files:
+        # Initialize the Watcher which does the startup sync
+        watcher = VaultWatcher(vault_path, config, vector_store, graph_store)
+        
         try:
-            chunks = make_chunks(file)
-            if chunks:
-                vector_store.upsert_chunks(chunks)
-                graph.upsert_chunks(chunks)
-                total_chunks += len(chunks)
+            watcher.sync_all(force=args.force)
         except Exception as exc:
-            failures.append(f"{file}: {exc}")
+            print(f"Startup sync failed: {exc}", file=sys.stderr)
+            return 1
 
-    print(f"Ingested {total_chunks} chunks from {len(files) - len(failures)} files into collection '{collection}'.")
-    print(f"Vector backend: {vector_store.backend}; graph backend: {graph.backend}.")
-    if failures:
-        print("Failures:", file=sys.stderr)
-        for failure in failures:
-            print(f"- {failure}", file=sys.stderr)
-        return 2
-    return 0
-
-
-def _ingest_files(files: list[Path], collection: str, reset: bool) -> tuple[int, int, list[str], str, str]:
-    config = load_config()
-    base = ensure_app_dirs(config)
-    vector_store = VectorStore(base, collection)
-    graph = GraphMemory(base, collection)
-    if reset:
-        vector_store.reset()
-        graph.reset()
-
-    total_chunks = 0
-    failures: list[str] = []
-    for file in files:
-        try:
-            chunks = make_chunks(file)
-            if chunks:
-                vector_store.upsert_chunks(chunks)
-                graph.upsert_chunks(chunks)
-                total_chunks += len(chunks)
-        except Exception as exc:
-            failures.append(f"{file}: {exc}")
-    return total_chunks, len(files) - len(failures), failures, vector_store.backend, graph.backend
-
-
-def _ingest_file_stream(
-    files,
-    collection: str,
-    reset: bool,
-) -> tuple[int, int, int, list[str], str, str]:
-    config = load_config()
-    base = ensure_app_dirs(config)
-    vector_store = VectorStore(base, collection)
-    graph = GraphMemory(base, collection)
-    if reset:
-        vector_store.reset()
-        graph.reset()
-
-    total_chunks = 0
-    indexed_files = 0
-    scanned_files = 0
-    failures: list[str] = []
-    for file in files:
-        scanned_files += 1
-        try:
-            chunks = make_chunks(file)
-            if chunks:
-                vector_store.upsert_chunks(chunks)
-                graph.upsert_chunks(chunks)
-                total_chunks += len(chunks)
-                indexed_files += 1
-        except Exception as exc:
-            failures.append(f"{file}: {exc}")
-    return total_chunks, indexed_files, scanned_files, failures, vector_store.backend, graph.backend
-
-
-def cmd_index_pc(args: argparse.Namespace) -> int:
-    config = load_config()
-    collection = validate_collection_name(args.collection or config.storage.collection)
-    roots = [Path(root).expanduser() for root in args.root] if args.root else default_pc_roots()
-    files = discover_pc_files(
-        roots,
-        include_sensitive=args.include_sensitive,
-        max_file_mb=args.max_file_mb,
-        limit=args.limit,
-    )
-    if args.dry_run:
-        print(f"Would index {len(files)} files into collection '{collection}'.")
-        for root in roots:
-            print(f"Root: {root}")
-        for file in files[:50]:
-            print(file)
-        if len(files) > 50:
-            print(f"... and {len(files) - 50} more")
-        return 0
-    if not files:
-        print("No supported PC files found.", file=sys.stderr)
-        return 1
-    file_stream = iter_pc_files(
-        roots,
-        include_sensitive=args.include_sensitive,
-        max_file_mb=args.max_file_mb,
-        limit=args.limit,
-    )
-    total_chunks, indexed_files, scanned_files, failures, vector_backend, graph_backend = _ingest_file_stream(
-        file_stream, collection, args.reset
-    )
-    print(f"Indexed {total_chunks} chunks from {indexed_files} PC files into collection '{collection}'.")
-    print(f"Scanned {scanned_files} candidate files.")
-    print(f"Vector backend: {vector_backend}; graph backend: {graph_backend}.")
-    if failures:
-        print("Failures:", file=sys.stderr)
-        for failure in failures[:25]:
-            print(f"- {failure}", file=sys.stderr)
-        if len(failures) > 25:
-            print(f"... and {len(failures) - 25} more failures", file=sys.stderr)
-        return 2
+        if args.watch:
+            print(f"Watching '{vault_path}' for changes. Press Ctrl+C to stop...")
+            watcher.start()
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print("\nStopping watcher...")
+                watcher.stop()
+    finally:
+        vector_store.close()
+            
     return 0
 
 
 def cmd_ask(args: argparse.Namespace) -> int:
+    if not args.question or not args.question.strip():
+        print("Error: question is empty.", file=sys.stderr)
+        return 1
     config = load_config()
     collection = validate_collection_name(args.collection or config.storage.collection)
     result = ask_question(args.question, config, collection=collection, top_k=args.top_k)
@@ -194,38 +123,58 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     config = load_config()
     base = ensure_app_dirs(config)
     vector_store = VectorStore(base, config.storage.collection)
-    graph = GraphMemory(base, config.storage.collection)
-    hardware = detect_hardware()
-    install_plan = ollama_install_plan()
-    status = ollama_status()
-    report = {
-        "storage_dir": str(base.resolve()),
-        "config_exists": (base / "config.json").exists(),
-        "optional_dependencies": {
-            "qdrant_edge_py": importlib.util.find_spec("qdrant_edge_py") is not None
-            or importlib.util.find_spec("qdrant_edge") is not None,
-            "falkordblite": importlib.util.find_spec("falkordblite") is not None,
-            "graphiti": importlib.util.find_spec("graphiti") is not None,
-            "langgraph": importlib.util.find_spec("langgraph") is not None,
-            "nvidia_ml_py": importlib.util.find_spec("pynvml") is not None,
-        },
-        "vector_backend": vector_store.backend,
-        "vector_chunks": vector_store.count(),
-        "graph_backend": graph.backend,
-        "graph_facts": graph.count_facts(),
-        "recommended_ollama_model": hardware.recommended_ollama_model,
-        "ollama_installed": install_plan.installed,
-        "ollama_command_path": install_plan.command_path,
-        "ollama_install_command": install_plan.install_command,
-        "ollama_available": status.available,
-        "ollama_message": status.message,
-        "ollama_models": status.models,
-    }
+    graph_store = GraphStore(base, config.storage.sqlite_filename)
+    
+    try:
+        hardware = detect_hardware()
+        parser_probe = probe_parser_tier()
+        install_plan = ollama_install_plan()
+        status = ollama_status()
+        topology = select_workflow_topology(hardware.recommended_tier)
+        
+        report = {
+            "storage_dir": str(base.resolve()),
+            "config_exists": (base / "config.json").exists(),
+            "dependencies": {
+                "qdrant-client": importlib.util.find_spec("qdrant_client") is not None,
+                "langgraph": importlib.util.find_spec("langgraph") is not None,
+                "watchdog": importlib.util.find_spec("watchdog") is not None,
+                "markdown-it-py": importlib.util.find_spec("markdown_it") is not None,
+            },
+            "vector_backend": vector_store.backend,
+            "vector_chunks": vector_store.count(),
+            "graph_backend": graph_store.backend,
+            "recommended_ollama_model": hardware.recommended_ollama_model,
+            "recommended_tier": hardware.recommended_tier,
+            "parser_tier": parser_probe.tier,
+            "parser_engine": parser_probe.engine,
+            "workflow_nodes": list(topology.nodes),
+            "ollama_installed": install_plan.installed,
+            "ollama_command_path": install_plan.command_path,
+            "ollama_available": status.available,
+            "ollama_message": status.message,
+            "ollama_models": status.models,
+        }
+    finally:
+        vector_store.close()
+    
     if args.json:
         print(json.dumps(report, indent=2))
     else:
         for key, value in report.items():
             print(f"{key}: {value}")
+    return 0
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    config = load_config()
+    if args.port is not None:
+        config.api.port = args.port
+    if args.persist_token:
+        config.api.persist_token = True
+        save_config(config)
+    print(f"Serving SentinelRAG on http://{config.api.host}:{config.api.port}")
+    run_api_server(config)
     return 0
 
 
@@ -298,21 +247,13 @@ def build_parser() -> argparse.ArgumentParser:
     setup_ollama.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     setup_ollama.set_defaults(func=cmd_setup_ollama)
 
-    ingest = subparsers.add_parser("ingest", help="Ingest local documents.")
-    ingest.add_argument("path", help="File or directory to ingest.")
+    ingest = subparsers.add_parser("ingest", help="Ingest local Markdown Obsidian vaults.")
+    ingest.add_argument("path", help="Vault directory to ingest.")
     ingest.add_argument("--reset", action="store_true", help="Reset collection before ingesting.")
+    ingest.add_argument("--force", action="store_true", help="Force full re-indexing of all files.")
     ingest.add_argument("--collection", default=None, help="Collection name.")
+    ingest.add_argument("--watch", action="store_true", help="Start filesystem watcher to track changes in real-time.")
     ingest.set_defaults(func=cmd_ingest)
-
-    index_pc = subparsers.add_parser("index-pc", help="Index supported documents from normal user folders.")
-    index_pc.add_argument("--root", action="append", default=[], help="Root directory to scan. Can be passed multiple times.")
-    index_pc.add_argument("--reset", action="store_true", help="Reset collection before indexing.")
-    index_pc.add_argument("--collection", default=None, help="Collection name.")
-    index_pc.add_argument("--max-file-mb", type=int, default=25, help="Skip files larger than this size.")
-    index_pc.add_argument("--limit", type=int, default=None, help="Maximum number of files to index.")
-    index_pc.add_argument("--include-sensitive", action="store_true", help="Include likely secret/credential files.")
-    index_pc.add_argument("--dry-run", action="store_true", help="List files that would be indexed without writing.")
-    index_pc.set_defaults(func=cmd_index_pc)
 
     ask = subparsers.add_parser("ask", help="Ask a question against indexed documents.")
     ask.add_argument("question", help="Question to answer.")
@@ -324,6 +265,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = subparsers.add_parser("doctor", help="Check local runtime dependencies.")
     doctor.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
     doctor.set_defaults(func=cmd_doctor)
+
+    serve = subparsers.add_parser("serve", help="Run the local authenticated API daemon.")
+    serve.add_argument("--port", type=int, default=None, help="Override the configured port.")
+    serve.add_argument("--persist-token", action="store_true", help="Persist the generated API token to disk.")
+    serve.set_defaults(func=cmd_serve)
     return parser
 
 
@@ -338,5 +284,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except ValueError as exc:
-        print(str(exc), file=sys.stderr)
+        print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
+    except Exception as exc:
+        import traceback
+        if args.verbose:
+            traceback.print_exc(file=sys.stderr)
+        else:
+            print(f"Error: {exc}", file=sys.stderr)
+        return 1

@@ -1,135 +1,117 @@
 from __future__ import annotations
 
 import json
-import re
+import logging
 import time
-import uuid
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from .config import AppConfig, ensure_app_dirs
-from .llm import choose_model, generate_with_ollama, ollama_status
-from .storage import GraphMemory, VectorStore
+from .hardware_profiler import detect_hardware
+from .resource_arbiter import ResourceArbiter
+from .storage.vector_store import VectorStore
+from .graph.graph_store import GraphStore
+from .agents.workflow import build_agent_graph
 from .types import Evidence
 
+logger = logging.getLogger(__name__)
 
-def extractive_answer(question: str, evidence: list[Evidence]) -> str:
-    if not evidence:
-        return "I do not have indexed evidence relevant to that question."
-    query_terms = {term.lower() for term in re.findall(r"[A-Za-z0-9_]+", question) if len(term) > 3}
-    candidates: list[tuple[int, int, str]] = []
-    for source_index, item in enumerate(evidence[:5], start=1):
-        for line in item.text.splitlines():
-            cleaned = _clean_evidence_line(line)
-            if not cleaned:
-                continue
-            score = sum(1 for term in query_terms if term in cleaned.lower())
-            if score > 0:
-                candidates.append((score, source_index, cleaned))
-
-    if not candidates:
-        for source_index, item in enumerate(evidence[:3], start=1):
-            cleaned = _clean_evidence_line(item.text)
-            if cleaned:
-                candidates.append((0, source_index, cleaned[:260]))
-
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    seen: set[str] = set()
-    bullets: list[str] = []
-    for _, source_index, text in candidates:
-        normalized = text.lower()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        bullets.append(f"- {text} [{source_index}]")
-        if len(bullets) == 4:
-            break
-
-    return "Based on the indexed evidence:\n" + "\n".join(bullets)
+_arbiter: ResourceArbiter | None = None
 
 
-def _clean_evidence_line(line: str) -> str:
-    cleaned = re.sub(r"\s+", " ", line).strip()
-    cleaned = cleaned.strip("| ")
-    cleaned = re.sub(r"^#+\s*", "", cleaned)
-    cleaned = re.sub(r"^- \[[ xX]\]\s*", "", cleaned)
-    cleaned = cleaned.replace("**", "").replace("__", "").strip()
-    cleaned = re.sub(r"^[-*]\s*", "", cleaned)
-    cleaned = cleaned.strip("*_ ")
-    if not cleaned or cleaned in {"---"}:
-        return ""
-    lowered = cleaned.lower()
-    if lowered.startswith(("sentinelrag ", "python -m sentinelrag ", "export pythonpath=", "$env:pythonpath=")):
-        return ""
-    if cleaned.startswith("```"):
-        return ""
-    if set(cleaned) <= {"-", "|", " "}:
-        return ""
-    if len(cleaned) < 24:
-        return ""
-    return cleaned[:320]
+def get_arbiter(tier: str) -> ResourceArbiter:
+    global _arbiter
+    if _arbiter is None:
+        _arbiter = ResourceArbiter(tier)
+    return _arbiter
 
 
-def build_prompt(question: str, evidence: list[Evidence]) -> str:
-    stable_context = "\n\n".join(
-        f"[{index}] Source: {item.source_path}\nScore: {item.score}\nTemporal: {item.temporal_status}\nFacts: {', '.join(item.facts) if item.facts else 'none'}\n{item.text}"
-        for index, item in enumerate(evidence, start=1)
-    )
-    boundary = f"BOUNDARY-{uuid.uuid4()}"
-    return (
-        "You are SentinelRAG, a local-first retrieval augmented assistant. "
-        "Answer only from the provided evidence. If the evidence is insufficient, say so. "
-        "Cite sources with bracket numbers like [1].\n\n"
-        f"Evidence:\n{stable_context}\n\n"
-        f"{boundary}\n"
-        f"Question: {question}\n"
-        "Answer:"
-    )
-
-
-def ask_question(question: str, config: AppConfig, collection: str | None = None, top_k: int | None = None) -> dict:
+def ask_question(
+    question: str,
+    config: AppConfig,
+    collection: str | None = None,
+    top_k: int | None = None,
+) -> dict[str, Any]:
+    """
+    Core RAG entrypoint. Detects hardware tier, obtains a query slot from the ResourceArbiter,
+    runs the LangGraph agent workflow, and formats the grounded response.
+    """
     started = time.perf_counter()
     base = ensure_app_dirs(config)
     active_collection = collection or config.storage.collection
-    vector_store = VectorStore(base, active_collection)
-    graph = GraphMemory(base, active_collection)
-    raw_evidence = vector_store.search(question, top_k or config.retrieval.top_k)
-    evidence = graph.expand_evidence(raw_evidence)
 
-    status = ollama_status()
-    if not status.available:
-        answer = extractive_answer(question, evidence)
-        model = choose_model(config.model.name, [])
-    elif not evidence:
-        answer = "I do not have indexed evidence relevant to that question."
-        model = choose_model(config.model.name, status.models)
-    else:
-        model = choose_model(config.model.name, status.models)
-        answer = generate_with_ollama(
-            build_prompt(question, evidence),
-            model=model,
-            num_ctx=config.model.num_ctx,
-            num_parallel=config.model.num_parallel,
-        )
+    # 1. Initialize stores
+    vector_store = VectorStore(base, active_collection)
+    graph_store = GraphStore(base, config.storage.sqlite_filename)
+
+    try:
+        # 2. Hardware and topology profiling
+        profile = detect_hardware()
+        tier = config.hardware.tier if config.hardware.tier != "auto" else profile.recommended_tier
+        
+        # Override top_k inside retrieval config if passed
+        if top_k is not None:
+            config.retrieval.top_k = top_k
+
+        # 3. Resource Arbitration
+        arbiter = get_arbiter(tier)
+        
+        with arbiter.query_slot():
+            # 4. Build and run LangGraph
+            graph = build_agent_graph(tier)
+            
+            inputs = {
+                "query": question,
+                "tier": tier,
+                "plans": [],
+                "vector_hits": [],
+                "graph_hits": [],
+                "retrieved_evidence": [],
+                "validation_status": "unknown",
+                "critique": "",
+                "draft_answer": "",
+                "final_answer": "",
+            }
+            
+            graph_config = {
+                "configurable": {
+                    "config": config,
+                    "vector_store": vector_store,
+                    "graph_store": graph_store,
+                }
+            }
+            
+            try:
+                outputs = graph.invoke(inputs, config=graph_config)
+                final_answer = outputs.get("final_answer", "No response generated.")
+                evidence = outputs.get("retrieved_evidence", [])
+            except Exception as exc:
+                logger.error("LangGraph execution failed: %s", exc)
+                final_answer = f"Error during query execution: {exc}"
+                evidence = []
+    finally:
+        vector_store.close()
 
     elapsed = round(time.perf_counter() - started, 3)
+
     return {
         "question": question,
-        "answer": answer,
-        "model": model,
+        "answer": final_answer,
+        "model": config.model.name if config.model.name != "auto" else profile.recommended_ollama_model,
         "elapsed_seconds": elapsed,
         "evidence": [asdict(item) for item in evidence],
     }
 
 
-def result_json(result: dict) -> str:
+def result_json(result: dict[str, Any]) -> str:
     return json.dumps(result, indent=2)
 
 
-def format_answer(result: dict) -> str:
+def format_answer(result: dict[str, Any]) -> str:
     lines = [result["answer"], "", "Sources:"]
     for index, item in enumerate(result["evidence"], start=1):
-        lines.append(f"[{index}] {Path(item['source_path']).name} ({item['score']})")
+        lines.append(f"[{index}] {Path(item['source_id']).name} ({item.get('final_score', item.get('score', 0.0))})")
     lines.append("")
     lines.append(f"Model: {result['model']} | elapsed: {result['elapsed_seconds']}s")
     return "\n".join(lines)

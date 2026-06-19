@@ -7,13 +7,16 @@ name = "sentinelrag"
 version = "0.1.0"
 description = "Local-first RAG CLI for searching and asking questions over local files"
 readme = "README.md"
-requires-python = ">=3.11"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+  "langgraph",
+  "qdrant-client",
+  "markdown-it-py",
+  "watchdog",
+]
 
 [project.optional-dependencies]
 edge = [
-  "qdrant-edge-py",
-  "falkordblite",
   "nvidia-ml-py",
 ]
 pdf = [
