@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**A High-Performance, Privacy-First, Local-First Hybrid RAG Engine for Obsidian Markdown Vaults**
+**A High-Performance, Privacy-First, Local Hybrid RAG Engine for Obsidian Markdown Vaults**
 
 [![Python Version](https://img.shields.io/badge/python-3.12%2B-blue.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Local First](https://img.shields.io/badge/architecture-local--first-green.svg?style=for-the-badge&logo=arch-linux&logoColor=white)](#)
@@ -13,9 +13,38 @@
 
 ---
 
-## 📖 Introduction
+## 📖 Table of Contents
+- [🛡️ SentinelRAG](#️-sentinelrag)
+  - [📖 Table of Contents](#-table-of-contents)
+  - [💡 Introduction](#-introduction)
+  - [🎯 Architecture Overview](#-architecture-overview)
+  - [✨ Features](#-features)
+  - [🚀 Installation](#-installation)
+    - [Option A: Global CLI Install via `pipx` (Recommended)](#option-a-global-cli-install-via-pipx-recommended)
+    - [Option B: Global CLI Install via standard `pip`](#option-b-global-cli-install-via-standard-pip)
+    - [Option C: Local Development with `uv`](#option-c-local-development-with-uv)
+  - [🎬 Basic Usage Flow](#-basic-usage-flow)
+  - [💻 Command Reference](#-command-reference)
+    - [1. `profile`](#1-profile)
+    - [2. `setup-ollama`](#2-setup-ollama)
+    - [3. `ingest`](#3-ingest)
+    - [4. `ask`](#4-ask)
+    - [5. `doctor`](#5-doctor)
+    - [6. `serve`](#6-serve)
+  - [🔌 API Integration & Obsidian Connection](#-api-integration--obsidian-connection)
+    - [Authentication](#authentication)
+    - [Endpoints](#endpoints)
+  - [💾 Storage Schema \& Internals](#-storage-schema--internals)
+    - [1. SQLite Relational Store (`sentinelrag.db`)](#1-sqlite-relational-store-sentinelragdb)
+    - [2. Qdrant Vector Store (`/qdrant/`)](#2-qdrant-vector-store-qdrant)
+  - [🧪 Testing](#-testing)
+  - [📄 License](#-license)
 
-**SentinelRAG** is a production-grade, local-first Retrieval-Augmented Generation (RAG) system engineered to turn your local **Obsidian Markdown Vault** into a private, highly-contextualized knowledge base. 
+---
+
+## 💡 Introduction
+
+**SentinelRAG** is a production-grade, local-first Retrieval-Augmented Generation (RAG) system engineered to turn your local **Obsidian Markdown Vault** into a private, highly-contextualized query engine. 
 
 Operating with absolute privacy (zero telemetry or cloud leaks), SentinelRAG employs a **hybrid retrieval strategy** combining semantic vector matching (Qdrant Local) with graph-theoretic structural analysis (SQLite Graph Store). It dynamically adjusts its reasoning workload using **hardware-adaptive LangGraph topologies** to ensure optimal performance, whether running on a low-end laptop or a multi-GPU workstation.
 
@@ -64,15 +93,11 @@ graph TD
 
 ---
 
-## 🚀 Installation & Quick Start
+## 🚀 Installation
 
-### 1. Prerequisites
-- Python `>=3.12` (Tested up to Python 3.14)
-- **Ollama** installed locally (Optional, but required for generative synthesis)
+Ensure you have Python `>=3.12` installed.
 
-### 2. Installation
-
-#### Option A: Global CLI Install via `pipx` (Recommended)
+### Option A: Global CLI Install via `pipx` (Recommended)
 This installs SentinelRAG globally in an isolated environment so you can run it from any directory on your device:
 
 ```bash
@@ -84,7 +109,7 @@ pipx ensurepath
 pipx install C:/Users/codex/GitHub/RAG
 ```
 
-#### Option B: Global CLI Install via standard `pip`
+### Option B: Global CLI Install via standard `pip`
 To install for your current user profile:
 
 ```bash
@@ -99,14 +124,17 @@ If the command is not recognized, add the Python scripts directory to your syste
   ```
   *(Note: Adjust `Python314` to your installed Python version if necessary.)*
 
-#### Option C: Local Development with `uv`
+### Option C: Local Development with `uv`
 ```bash
 git clone https://github.com/CODExGAMERZ/SentinelRAG.git
 cd SentinelRAG
 uv pip install -e .
 ```
 
-### 3. Basic Usage Flow
+---
+
+## 🎬 Basic Usage Flow
+
 Once installed, you can call the command from any folder:
 
 ```bash
@@ -131,7 +159,7 @@ All commands can be executed using `uv run sentinelrag <command>` or directly vi
 
 ### 1. `profile`
 Profiles your local system resources (CPU, RAM, GPU) and sets optimal configuration parameters.
-* **Usage**: `uv run sentinelrag profile [options]`
+* **Usage**: `sentinelrag profile [options]`
 * **Options**:
   * `--json`: Print machine-readable JSON output instead of plain text.
 
@@ -139,7 +167,7 @@ Profiles your local system resources (CPU, RAM, GPU) and sets optimal configurat
 
 ### 2. `setup-ollama`
 Checks local Ollama server connectivity, installs it if missing, and downloads the recommended model.
-* **Usage**: `uv run sentinelrag setup-ollama [options]`
+* **Usage**: `sentinelrag setup-ollama [options]`
 * **Options**:
   * `--install`: Automatically install the Ollama runner if it is not detected on your system.
   * `--pull-model`: Automatically pull the recommended local model (e.g. `qwen2.5:3b`) from the Ollama registry.
@@ -150,7 +178,7 @@ Checks local Ollama server connectivity, installs it if missing, and downloads t
 
 ### 3. `ingest`
 Parses and indexes an Obsidian vault directory into your local databases.
-* **Usage**: `uv run sentinelrag ingest <path> [options]`
+* **Usage**: `sentinelrag ingest <path> [options]`
 * **Arguments**:
   * `<path>`: The absolute or relative path to the Obsidian Markdown Vault folder.
 * **Options**:
@@ -163,7 +191,7 @@ Parses and indexes an Obsidian vault directory into your local databases.
 
 ### 4. `ask`
 Performs queries against your local collection using the hybrid retrieval and agent synthesis engine.
-* **Usage**: `uv run sentinelrag ask <question> [options]`
+* **Usage**: `sentinelrag ask <question> [options]`
 * **Arguments**:
   * `<question>`: The question query to answer.
 * **Options**:
@@ -175,7 +203,7 @@ Performs queries against your local collection using the hybrid retrieval and ag
 
 ### 5. `doctor`
 Performs system health checks, validating libraries, database sizes, Ollama connection, and active configuration paths.
-* **Usage**: `uv run sentinelrag doctor [options]`
+* **Usage**: `sentinelrag doctor [options]`
 * **Options**:
   * `--json`: Print diagnostics report in machine-readable JSON.
 
@@ -183,10 +211,50 @@ Performs system health checks, validating libraries, database sizes, Ollama conn
 
 ### 6. `serve`
 Runs the authenticated local API server to connect external client interfaces to your SentinelRAG engine.
-* **Usage**: `uv run sentinelrag serve [options]`
+* **Usage**: `sentinelrag serve [options]`
 * **Options**:
   * `--port <num>`: Specify a custom port to run the API daemon (defaults to the configured port).
   * `--persist-token`: Save the generated or specified API authorization token to disk.
+
+---
+
+## 🔌 API Integration & Obsidian Connection
+
+SentinelRAG includes an embedded authenticated web server that lets you connect third-party user interfaces (like Obsidian plugins, local websites, or desktop widgets) directly to your indexed knowledge base.
+
+To spin up the local server, run:
+```bash
+sentinelrag serve --port 8000
+```
+At startup, the server will print a **Bearer Token** to the console. You must include this token in the `Authorization` header of all requests.
+
+### Authentication
+Include the following header with your requests:
+```http
+Authorization: Bearer <YOUR_API_TOKEN>
+```
+
+### Endpoints
+* **`POST /api/query`**: Queries the SentinelRAG engine.
+  * **Payload**:
+    ```json
+    {
+      "question": "What is Qwen3?",
+      "collection": "default",
+      "top_k": 8
+    }
+    ```
+  * **Response**: Returns the answer, metadata, and complete cited context sources.
+
+* **`POST /api/ingest`**: Triggers a synchronization run of a local directory folder.
+  * **Payload**:
+    ```json
+    {
+      "path": "C:/Users/codex/GitHub/RAG/storage_vault",
+      "reset": false,
+      "force": false
+    }
+    ```
 
 ---
 
