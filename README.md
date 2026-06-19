@@ -100,44 +100,66 @@ uv run sentinelrag ask "What is Qwen3?"
 
 ## 💻 Command Reference
 
-### `profile`
-Profiles CPU cores, RAM, and GPU capacity to write hardware-adaptive configurations.
-```bash
-uv run sentinelrag profile --json
-```
+All commands can be executed using `uv run sentinelrag <command>` or directly via the globally installed `sentinelrag <command>` CLI entrypoint.
 
-### `setup-ollama`
-Checks for, installs, and configures Ollama connections.
-```bash
-# Automatically install Ollama and pull the recommended model
-uv run sentinelrag setup-ollama --install --pull-model
-```
+### 1. `profile`
+Profiles your local system resources (CPU, RAM, GPU) and sets optimal configuration parameters.
+* **Usage**: `uv run sentinelrag profile [options]`
+* **Options**:
+  * `--json`: Print machine-readable JSON output instead of plain text.
 
-### `ingest`
-Indexes a local directory containing Markdown files.
-```bash
-# Ingest with incremental watch mode enabled
-uv run sentinelrag ingest path/to/vault --watch
+---
 
-# Force rebuild/re-indexing of all files (ignoring modification times)
-uv run sentinelrag ingest path/to/vault --force
-```
+### 2. `setup-ollama`
+Checks local Ollama server connectivity, installs it if missing, and downloads the recommended model.
+* **Usage**: `uv run sentinelrag setup-ollama [options]`
+* **Options**:
+  * `--install`: Automatically install the Ollama runner if it is not detected on your system.
+  * `--pull-model`: Automatically pull the recommended local model (e.g. `qwen2.5:3b`) from the Ollama registry.
+  * `--model <name>`: Override the recommended Ollama model and specify a custom model to download/configure.
+  * `--json`: Print machine-readable configuration JSON.
 
-### `ask`
-Performs queries against your local collection.
-```bash
-# Query the default namespace collection and print citations
-uv run sentinelrag ask "What is SentinelRAG?"
+---
 
-# Return structured JSON output for API integrations
-uv run sentinelrag ask "What is SentinelRAG?" --json --top-k 5
-```
+### 3. `ingest`
+Parses and indexes an Obsidian vault directory into your local databases.
+* **Usage**: `uv run sentinelrag ingest <path> [options]`
+* **Arguments**:
+  * `<path>`: The absolute or relative path to the Obsidian Markdown Vault folder.
+* **Options**:
+  * `--reset`: Drop all existing points in the vector store and clean SQLite tables before starting ingestion.
+  * `--force`: Force a full re-indexing of all vault files, bypassing the timestamp/mtime change checks.
+  * `--collection <name>`: Ingest files into a named vector and graph collection namespace (defaults to `default`).
+  * `--watch`: Start a persistent background filesystem watcher to track vault saves, updates, deletions, and renames in real-time.
 
-### `doctor`
-Displays diagnostic outputs for all parts of the system.
-```bash
-uv run sentinelrag doctor
-```
+---
+
+### 4. `ask`
+Performs queries against your local collection using the hybrid retrieval and agent synthesis engine.
+* **Usage**: `uv run sentinelrag ask <question> [options]`
+* **Arguments**:
+  * `<question>`: The question query to answer.
+* **Options**:
+  * `--collection <name>`: Specify which collection namespace to query (defaults to `default`).
+  * `--top-k <num>`: Override the configured number of vector chunks to retrieve for context synthesis.
+  * `--json`: Print machine-readable JSON containing the answer, duration, model, and detailed citations.
+
+---
+
+### 5. `doctor`
+Performs system health checks, validating libraries, database sizes, Ollama connection, and active configuration paths.
+* **Usage**: `uv run sentinelrag doctor [options]`
+* **Options**:
+  * `--json`: Print diagnostics report in machine-readable JSON.
+
+---
+
+### 6. `serve`
+Runs the authenticated local API server to connect external client interfaces to your SentinelRAG engine.
+* **Usage**: `uv run sentinelrag serve [options]`
+* **Options**:
+  * `--port <num>`: Specify a custom port to run the API daemon (defaults to the configured port).
+  * `--persist-token`: Save the generated or specified API authorization token to disk.
 
 ---
 
