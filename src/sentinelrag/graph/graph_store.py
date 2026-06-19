@@ -22,7 +22,6 @@ class GraphStore:
 
     def _init_db(self) -> None:
         with self.get_conn() as conn:
-            # Table for notes (graph nodes)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS nodes (
                     path TEXT PRIMARY KEY,
@@ -32,7 +31,6 @@ class GraphStore:
                     is_evergreen INTEGER DEFAULT 0
                 )
             """)
-            # Table for Wikilink edges
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS edges (
                     source TEXT,
@@ -42,7 +40,6 @@ class GraphStore:
                     FOREIGN KEY (source) REFERENCES nodes(path) ON DELETE CASCADE
                 )
             """)
-            # Table for block hashes and metadata
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS blocks (
                     block_id TEXT,
@@ -59,7 +56,6 @@ class GraphStore:
                     FOREIGN KEY (source_path) REFERENCES nodes(path) ON DELETE CASCADE
                 )
             """)
-            # Table for SPO triples
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS triples (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,7 +93,6 @@ class GraphStore:
 
     def delete_note(self, path: str) -> None:
         with self.get_conn() as conn:
-            # Enable foreign keys for cascading deletes
             conn.execute("PRAGMA foreign_keys = ON")
             conn.execute("DELETE FROM nodes WHERE path = ?", (path,))
             conn.commit()

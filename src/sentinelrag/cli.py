@@ -84,7 +84,6 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             vector_store.reset()
             graph_store.reset()
 
-        # Initialize the Watcher which does the startup sync
         watcher = VaultWatcher(vault_path, config, vector_store, graph_store)
         
         try:
@@ -278,7 +277,14 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
+        
     parser = build_parser()
+    
+    check_argv = argv if argv is not None else sys.argv[1:]
+    if not check_argv:
+        parser.print_help()
+        return 0
+
     args = parser.parse_args(argv)
     configure_logging(args.verbose)
     try:

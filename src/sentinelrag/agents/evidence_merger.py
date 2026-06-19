@@ -23,16 +23,13 @@ def merge_evidence(
     and scores candidates using a multi-factor blend of Semantic Similarity,
     Normalized Centrality, and Temporal Relevance.
     """
-    # 1. Reciprocal Rank Fusion (RRF) to merge candidate lists
     rrf_scores: dict[str, float] = {}
     
-    # Map chunk_id to its respective raw hits
     vector_map = {item.chunk_id: item for item in vector_hits}
     graph_map = {item.chunk_id: item for item in graph_hits}
     
     all_chunk_ids = set(vector_map.keys()) | set(graph_map.keys())
     
-    # Calculate rank dictionaries
     vector_ranks = {item.chunk_id: idx for idx, item in enumerate(vector_hits)}
     graph_ranks = {item.chunk_id: idx for idx, item in enumerate(graph_hits)}
     
@@ -44,14 +41,10 @@ def merge_evidence(
             score += 1.0 / (60.0 + graph_ranks[chunk_id] + 1)
         rrf_scores[chunk_id] = score
 
-    # Sort candidates by RRF score to select top hits
     sorted_chunks = sorted(all_chunk_ids, key=lambda c: rrf_scores[c], reverse=True)
     
-    # 2. Gather notes metadata from SQLite to compute centrality and recency
-    # We query the SQLite nodes table for candidate files
     candidates: list[MergedEvidence] = []
     
-    # Fetch note properties for all candidate source files
     note_metadata: dict[str, dict] = {}
     with graph_store.get_conn() as conn:
         cursor = conn.execute("SELECT path, centrality, mtime, is_evergreen FROM nodes")
@@ -62,7 +55,6 @@ def merge_evidence(
                 "is_evergreen": bool(row["is_evergreen"]),
             }
 
-    # Normalize centrality scores within the retrieved candidate set
     raw_centralities: dict[str, float] = {}
     for chunk_id in sorted_chunks:
         hit = vector_map.get(chunk_id) or graph_map[chunk_id]
@@ -72,7 +64,6 @@ def merge_evidence(
     normalized_centralities = min_max_normalize(raw_centralities)
 
     for chunk_id in sorted_chunks:
-        # Determine source type
         in_vector = chunk_id in vector_map
         in_graph = chunk_id in graph_map
         
@@ -92,23 +83,18 @@ def merge_evidence(
             "is_evergreen": False
         })
         
-        # Semantic Score (None if not in vector_hits)
         semantic_score = vector_map[chunk_id].score if chunk_id in vector_map else None
         
-        # Centrality Score
         centrality_score = normalized_centralities[chunk_id]
         
-        # Recency Score
         if query_is_temporal:
             recency_score = compute_recency_score(meta["mtime"], meta["is_evergreen"])
         else:
             recency_score = 1.0
 
-        # Multi-factor Blending
         sem = semantic_score if semantic_score is not None else 0.0
         final_score = (0.60 * sem) + (0.30 * centrality_score) + (0.10 * recency_score)
 
-        # Build provenance
         provenance = {
             "chunk_id": chunk_id,
             "facts": list(hit.facts),
@@ -127,5 +113,4 @@ def merge_evidence(
             )
         )
 
-    # Sort final merged candidates by final_score
     return sorted(candidates, key=lambda item: item.final_score, reverse=True)

@@ -15,7 +15,6 @@ from ..types import Evidence, ChunkRecord, MarkdownBlockIR
 
 logger = logging.getLogger(__name__)
 
-# Thread-safe client cache with reference counting
 _client_cache: dict[str, tuple[QdrantClient, int]] = {}
 _cache_lock = threading.Lock()
 
@@ -66,7 +65,6 @@ class VectorStore:
         self.base_dir = ensure_within_base(root, root / self.collection)
         self.base_dir.mkdir(parents=True, exist_ok=True)
         
-        # Initialize/Acquire client from local disk cache
         self.client_path = str(self.base_dir)
         self.client = acquire_client(self.client_path)
         self.backend = "qdrant"
@@ -123,7 +121,6 @@ class VectorStore:
             
             vector = embed_text(text)
             
-            # Create a deterministic UUID/int ID from the chunk_id string
             import uuid
             point_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, chunk_id)
             

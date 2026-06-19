@@ -55,28 +55,22 @@ def retriever_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     top_k = app_config.retrieval.top_k
     depth = app_config.retrieval.graph_expansion_depth
 
-    # 1. Vector retrieval
     vector_hits = vector_store.search(query, top_k)
 
-    # 2. Rule-based NER entity extraction (fast, no LLM call)
     entity_seeds = list(set(re.findall(r"\b[A-Z][A-Za-z0-9_]{2,}\b", query)))
     
-    # 3. Find seed notes in Graph Database
     seed_paths = []
     for entity in entity_seeds:
         notes = graph_store.get_note_by_title(entity)
         for n in notes:
             seed_paths.append(n["path"])
 
-    # 4. Multi-hop traversal over Wikilinks
     traversed_nodes = traverse_graph(graph_store, seed_paths, depth)
 
-    # 5. Extract blocks from traversed notes to form graph hits
     graph_hits = []
     for path, d in traversed_nodes.items():
         blocks = graph_store.get_blocks_for_note(path)
         for b in blocks:
-            # Score decreases with depth distance
             score = round(1.0 - (d * 0.25), 4)
             graph_hits.append(
                 Evidence(
@@ -109,7 +103,6 @@ def evidence_merger_node(state: AgentState, config: RunnableConfig) -> dict[str,
 
     merged = merge_evidence(vector_hits, graph_hits, graph_store, query_is_temporal)
     
-    # Restrict total evidence to top_k config
     top_k = app_config.retrieval.top_k
     return {"retrieved_evidence": merged[:top_k]}
 
@@ -231,7 +224,6 @@ def synthesizer_node(state: AgentState, config: RunnableConfig) -> dict[str, Any
     try:
         final_answer = generate_with_ollama(prompt, model, num_ctx, num_parallel)
     except Exception as exc:
-        # Fallback to simple extractive/un-synthesized answer
         final_answer = f"Fallback answer based on source [1]: {evidence_list[0].content[:200]}..."
 
     return {"final_answer": final_answer}

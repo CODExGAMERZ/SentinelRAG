@@ -1,12 +1,9 @@
-# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
 
-# C extensions
 *.so
 
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -25,7 +22,6 @@ share/python-wheels/
 .installed.cfg
 *.egg
 
-# Virtual environments
 venv/
 .venv/
 env/
@@ -33,25 +29,20 @@ ENV/
 env.bak/
 venv.bak/
 
-# Local databases and storage
 data/
 *.db
 *.sqlite
 *.sqlite3
 
-# Environments
 .env
 .env.*
 
-# IDEs
 .vscode/
 .idea/
 
-# OS files
 .DS_Store
 Thumbs.db
 
-# Project-specific caches and scratch dirs
 .pytest_cache/
 scratch/
 .agents/

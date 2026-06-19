@@ -7,18 +7,15 @@ from sentinelrag.graph.ranking import compute_pagerank, min_max_normalize, compu
 def test_pagerank_computation(tmp_path: Path) -> None:
     graph_store = GraphStore(tmp_path, "test.db")
     
-    # Insert notes (A, B, C)
     graph_store.upsert_note("A.md", "A", time.time())
     graph_store.upsert_note("B.md", "B", time.time())
     graph_store.upsert_note("C.md", "C", time.time())
     
-    # Add edges: A -> B, B -> C
     graph_store.add_edge("A.md", "B.md")
     graph_store.add_edge("B.md", "C.md")
     
     pr = compute_pagerank(graph_store)
     assert len(pr) == 3
-    # B should have high rank because it has bi-directional connections in undirected view
     assert pr["B.md"] > 0
 
 
@@ -32,13 +29,10 @@ def test_min_max_normalization() -> None:
 
 def test_recency_score_decay() -> None:
     now = time.time()
-    # Evergreen note
     assert compute_recency_score(now - 1000000, is_evergreen=True) == 1.0
     
-    # Fleeting note
     fresh = compute_recency_score(now, is_evergreen=False)
     assert abs(fresh - 1.0) < 1e-4
     
     old = compute_recency_score(now - (90 * 24 * 3600), is_evergreen=False)
-    # should be exp(-1) = 0.367879...
     assert round(old, 4) == 0.3679

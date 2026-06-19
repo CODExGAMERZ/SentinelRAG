@@ -24,8 +24,6 @@ def compute_pagerank(
     edges = graph_store.get_all_edges()
     n_nodes = len(nodes)
 
-    # Convert to directed edges. If Wikilinks are undirected, treat as bi-directional.
-    # To keep PageRank representative of the Wikilinks, we use undirected representation.
     out_degree: dict[str, int] = {node: 0 for node in nodes}
     in_edges: dict[str, list[str]] = {node: [] for node in nodes}
 
@@ -33,7 +31,6 @@ def compute_pagerank(
         if src in out_degree and dst in in_edges:
             out_degree[src] += 1
             in_edges[dst].append(src)
-        # Undirected mapping support (mirror edge)
         if dst in out_degree and src in in_edges:
             out_degree[dst] += 1
             in_edges[src].append(dst)

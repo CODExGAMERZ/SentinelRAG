@@ -22,24 +22,18 @@ class ParserProbeResult:
 
 def probe_parser_tier() -> ParserProbeResult:
     """Probes the system to find the highest functional parser tier."""
-    # Tier 1: tree-sitter (often requires compilation/precompiled binary)
     try:
         import tree_sitter  # type: ignore  # noqa: F401
-        # Check if we can load markdown grammar
-        # (This is speculative since markdown grammar needs compilation,
-        #  if it raises or fails, we fall back)
         return ParserProbeResult(tier="tier1", engine="tree-sitter")
     except Exception:
         pass
 
-    # Tier 2: markdown-it-py (pure Python)
     try:
         import markdown_it  # type: ignore  # noqa: F401
         return ParserProbeResult(tier="tier2", engine="markdown-it-py")
     except Exception:
         pass
 
-    # Tier 3: Regex fallback
     return ParserProbeResult(tier="tier3", engine="regex")
 
 
@@ -58,7 +52,6 @@ def _select_parser(tier: str) -> Callable[[str, str], list[MarkdownBlockIR]]:
         try:
             return _tree_sitter_parse
         except Exception:
-            # Graceful degradation to markdown-it-py or regex
             pass
     if tier in {"tier2", "markdown-it-py"}:
         try:
@@ -69,9 +62,6 @@ def _select_parser(tier: str) -> Callable[[str, str], list[MarkdownBlockIR]]:
 
 
 def _tree_sitter_parse(text: str, source_path: str) -> list[MarkdownBlockIR]:
-    # Placeholder for tree-sitter parser structure
-    # Since tree-sitter-markdown is rarely precompiled on consumer machines,
-    # we fall back to markdown-it-py.
     try:
         raise NotImplementedError("tree-sitter-markdown grammar not compiled; falling back.")
     except Exception:
@@ -86,14 +76,12 @@ def _markdown_it_parse(text: str, source_path: str) -> list[MarkdownBlockIR]:
     blocks: list[MarkdownBlockIR] = []
     headers: list[str] = []
     
-    # We walk the token list and aggregate structural blocks
     i = 0
     while i < len(tokens):
         token = tokens[i]
         
         if token.type == "heading_open":
             level = int(token.tag[1])  # 'h1' -> 1
-            # Next token is usually the inline content of the heading
             i += 1
             inline_token = tokens[i]
             title = inline_token.content.strip()
@@ -105,19 +93,16 @@ def _markdown_it_parse(text: str, source_path: str) -> list[MarkdownBlockIR]:
         elif token.type == "paragraph_open":
             i += 1
             inline_token = tokens[i]
-            # Paragraphs can contain inline text
             content = inline_token.content.strip()
             if content:
                 blocks.append(_build_block(source_path, "paragraph", content, headers))
                 
         elif token.type == "fence":
-            # Code fence block
             content = token.content.strip()
             if content:
                 blocks.append(_build_block(source_path, "code_block", content, headers))
                 
         elif token.type == "list_item_open":
-            # List item. We find the next inline token for its text
             item_content = []
             depth = 1
             while i + 1 < len(tokens) and depth > 0:
@@ -136,7 +121,6 @@ def _markdown_it_parse(text: str, source_path: str) -> list[MarkdownBlockIR]:
                 
         i += 1
 
-    # Fallback to regex if parsing yields nothing from a non-empty text
     if not blocks and text.strip():
         return _regex_structural_parse(text, source_path)
         
@@ -215,11 +199,9 @@ def _build_block(source_path: str, block_type: str, content: str, headers: list[
     header_path = " > ".join(headers[:-1] if block_type == "heading" else headers)
     fingerprint = content[:64]
     
-    # Decouple block identity from source note location
     block_seed = f"{header_path}|{block_type}|{fingerprint}"
     block_id = hashlib.sha256(block_seed.encode("utf-8", errors="replace")).hexdigest()[:24]
     
-    # Extract tags and wikilinks from content
     tags = [f"#{match.group(1)}" for match in TAG_RE.finditer(content)]
     links = [match.group(1).strip() for match in WIKILINK_RE.finditer(content)]
     

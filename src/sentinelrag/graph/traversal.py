@@ -19,7 +19,6 @@ def traverse_graph(
     if not seed_paths or max_depth < 0:
         return {}
 
-    # Build adjacency list from edges
     adj: dict[str, list[str]] = {}
     edges = graph_store.get_all_edges()
     for src, dst in edges:

@@ -12,26 +12,22 @@ def test_watcher_rename_integrity(tmp_path: Path) -> None:
     vector_store = VectorStore(tmp_path, "test_collection")
     graph_store = GraphStore(tmp_path, "test.db")
     
-    # Write a mock note
     old_file = tmp_path / "OldNote.md"
     old_file.write_text("# OldNote\n\nContent here.", encoding="utf-8")
     
     watcher = VaultWatcher(tmp_path, config, vector_store, graph_store)
     
-    # Ingest it once
     watcher._index_file(old_file, old_file.stat().st_mtime)
     
     assert graph_store.get_note_mtimes() != {}
     assert vector_store.count() == 2  # heading and paragraph
     
-    # Rename event
     new_file = tmp_path / "NewNote.md"
     new_file.write_text("# NewNote\n\nContent here.", encoding="utf-8")
     
     event = FileMovedEvent(str(old_file), str(new_file))
     watcher._dispatch_debounced_event(event)
     
-    # Check that database matches new path and no duplication in vector store
     assert str(old_file.resolve()) not in graph_store.get_note_mtimes()
     assert str(new_file.resolve()) in graph_store.get_note_mtimes()
     assert vector_store.count() == 2

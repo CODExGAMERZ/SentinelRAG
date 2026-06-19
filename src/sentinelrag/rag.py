@@ -41,24 +41,19 @@ def ask_question(
     base = ensure_app_dirs(config)
     active_collection = collection or config.storage.collection
 
-    # 1. Initialize stores
     vector_store = VectorStore(base, active_collection)
     graph_store = GraphStore(base, config.storage.sqlite_filename)
 
     try:
-        # 2. Hardware and topology profiling
         profile = detect_hardware()
         tier = config.hardware.tier if config.hardware.tier != "auto" else profile.recommended_tier
         
-        # Override top_k inside retrieval config if passed
         if top_k is not None:
             config.retrieval.top_k = top_k
 
-        # 3. Resource Arbitration
         arbiter = get_arbiter(tier)
         
         with arbiter.query_slot():
-            # 4. Build and run LangGraph
             graph = build_agent_graph(tier)
             
             inputs = {

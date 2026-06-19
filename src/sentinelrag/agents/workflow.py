@@ -47,7 +47,6 @@ def build_agent_graph(tier: str) -> Any:
     topology = select_workflow_topology(tier)
     builder = StateGraph(AgentState)
 
-    # Add all required nodes dynamically based on topology
     if "planner" in topology.nodes:
         builder.add_node("planner", planner_node)
     if "retriever" in topology.nodes:
@@ -63,7 +62,6 @@ def build_agent_graph(tier: str) -> Any:
     if "synthesizer" in topology.nodes:
         builder.add_node("synthesizer", synthesizer_node)
 
-    # Add linear edges following the node sequence
     nodes_seq = list(topology.nodes)
     builder.add_edge(START, nodes_seq[0])
     for i in range(len(nodes_seq) - 1):

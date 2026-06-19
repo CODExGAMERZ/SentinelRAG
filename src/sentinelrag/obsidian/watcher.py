@@ -42,7 +42,6 @@ class VaultWatcher(FileSystemEventHandler):
         self.graph_store = graph_store
         self.entity_graph = EntityGraph(graph_store)
 
-        # Thread-safe debounce mechanism
         self.event_queue: queue.Queue[tuple[float, FileSystemEvent]] = queue.Queue()
         self.stop_event = Event()
         self.worker_thread = Thread(target=self._process_queue, daemon=True)
@@ -52,7 +51,6 @@ class VaultWatcher(FileSystemEventHandler):
         """Performs a startup delta sync comparing file mtimes against SQLite records."""
         logger.info("Starting startup delta sync for vault: %s", self.vault_path)
         
-        # 1. Discover all current markdown files in the vault
         current_files = {}
         for root, _, files in os.walk(self.vault_path):
             for file in files:
@@ -63,16 +61,13 @@ class VaultWatcher(FileSystemEventHandler):
                     except OSError:
                         pass
 
-        # 2. Retrieve existing mtimes from database
         db_files = self.graph_store.get_note_mtimes()
 
-        # Check if vector store is empty to force a full re-sync
         force_full_sync = force or (self.vector_store.count() == 0 and len(current_files) > 0)
         if force_full_sync:
             logger.info("VectorStore is empty or force sync requested. Forcing full sync of all files.")
             db_files = {}
 
-        # 3. Detect changes
         deleted_files = set(db_files.keys()) - set(current_files.keys())
         modified_files = []
         new_files = []
@@ -83,12 +78,10 @@ class VaultWatcher(FileSystemEventHandler):
             elif mtime > db_files[path] + 0.1:  # small margin
                 modified_files.append(path)
 
-        # 4. Process deletions
         for path in deleted_files:
             logger.info("Sync deletion detected for note: %s", path)
             self._handle_note_deleted(path)
 
-        # 5. Process new and modified files
         for path in new_files:
             logger.info("Sync new note detected: %s", path)
             self._index_file(Path(path), current_files[path], force_reindex=force_full_sync)
@@ -97,7 +90,6 @@ class VaultWatcher(FileSystemEventHandler):
             logger.info("Sync modification detected for note: %s", path)
             self._index_file(Path(path), current_files[path], force_reindex=force_full_sync)
 
-        # 6. Re-resolve all Wikilink edges now that notes are indexed
         self._rebuild_all_edges()
         logger.info("Startup delta sync completed.")
 
@@ -106,25 +98,20 @@ class VaultWatcher(FileSystemEventHandler):
         str_path = str(path.resolve())
         title = path.stem
         
-        # 1. Parse markdown file to MarkdownBlockIR
         try:
             new_blocks = parse_markdown_file(path, self.config.retrieval.parser_tier)
         except Exception as exc:
             logger.error("Failed to parse markdown file %s: %s", str_path, exc)
             return
 
-        # 2. Check if evergreen (contains #evergreen tag in any block)
         is_evergreen = any("#evergreen" in block.tags for block in new_blocks)
 
-        # 3. Upsert note metadata
         self.graph_store.upsert_note(str_path, title, mtime, is_evergreen)
 
-        # 4. Load previous blocks from GraphStore (empty if forcing re-index)
         old_blocks = [] if force_reindex else self.graph_store.get_blocks_for_note(str_path)
         old_by_id = {b.block_id: b for b in old_blocks}
         new_by_id = {b.block_id: b for b in new_blocks}
 
-        # 5. Determine block diffs
         inserts = [b for b in new_blocks if b.block_id not in old_by_id]
         deletes = [b for b in old_blocks if b.block_id not in new_by_id]
         updates = []
@@ -132,10 +119,8 @@ class VaultWatcher(FileSystemEventHandler):
             if b.block_id in old_by_id and b.content_hash != old_by_id[b.block_id].content_hash:
                 updates.append(b)
 
-        # 6. Apply deletions
         for block in deletes:
             self.vector_store.delete_file(block.source_path)  # Qdrant deletes by metadata filter (e.g. block_id)
-            # Actually, delete specific point UUID:
             import uuid
             point_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, block.block_id)
             self.vector_store.client.delete(
@@ -143,18 +128,15 @@ class VaultWatcher(FileSystemEventHandler):
                 points_selector=[str(point_uuid)]
             )
             self.graph_store.delete_block_by_id(str_path, block.block_id)
-            # Delete triples for this block
             with self.graph_store.get_conn() as conn:
                 conn.execute("DELETE FROM triples WHERE source_block_id = ?", (block.block_id,))
                 conn.commit()
 
-        # 7. Apply inserts and updates
         to_upsert_vector = []
         for block in inserts + updates:
             self.graph_store.upsert_block(block)
             to_upsert_vector.append(block)
             
-            # Extract SPO triples
             self._extract_and_store_triples(block)
 
         if to_upsert_vector:
@@ -162,16 +144,13 @@ class VaultWatcher(FileSystemEventHandler):
 
     def _extract_and_store_triples(self, block: MarkdownBlockIR) -> None:
         """Extracts and stores Subject-Predicate-Object triples for a block."""
-        # Clean existing triples for this block first
         with self.graph_store.get_conn() as conn:
             conn.execute("DELETE FROM triples WHERE source_block_id = ?", (block.block_id,))
             conn.commit()
 
-        # Ingestion-time LLM entity extraction
         triples = []
         status = ollama_status()
         
-        # Only use LLM if Ollama is available, otherwise fall back to simple regex triple extractor
         if status.available:
             prompt = (
                 "Extract subject-predicate-object triples from the following text. "
@@ -187,7 +166,6 @@ class VaultWatcher(FileSystemEventHandler):
                     num_ctx=2048,
                     num_parallel=1,
                 )
-                # Attempt to parse JSON from response
                 match = re.search(r"(\[.*\])", response, re.DOTALL)
                 if match:
                     parsed = json.loads(match.group(1))
@@ -198,8 +176,6 @@ class VaultWatcher(FileSystemEventHandler):
             except Exception:
                 pass
 
-        # Regex fallback extractor: search for simple patterns
-        # e.g., "A is a B" or "A outperformed B"
         if not triples:
             triples = self._regex_triple_extractor(block.content)
 
@@ -207,12 +183,9 @@ class VaultWatcher(FileSystemEventHandler):
             self.entity_graph.add_triple(s, p, o, block.block_id, block.source_path)
 
     def _regex_triple_extractor(self, text: str) -> list[tuple[str, str, str]]:
-        # Match "EntityA relation EntityB" or similar simple structures
         triples = []
-        # Match capitalized terms
         entity_matches = re.findall(r"\b[A-Z][A-Za-z0-9_]{2,}\b", text)
         if len(entity_matches) >= 2:
-            # Create a generic relation chain between consecutive capitalized words
             for i in range(len(entity_matches) - 1):
                 triples.append((entity_matches[i], "mentions", entity_matches[i + 1]))
         return triples
@@ -231,12 +204,6 @@ class VaultWatcher(FileSystemEventHandler):
             conn.execute("UPDATE edges SET target = ? WHERE target = ?", (new_path, old_path))
             conn.commit()
 
-        # Update Qdrant payloads with new path
-        # Since local Qdrant is on-disk, we retrieve all points for the old path, delete them, and upsert with new path.
-        # But wait! A simpler way is to just re-index the note. Or update the payload.
-        # To avoid re-embedding, we can query Qdrant points and update their payload source_path.
-        # However, for simplicity and perfect correctness, we delete old points and re-upsert them with the updated path.
-        # Since embedding is fast (deterministic hash-based vector), reindexing is extremely cheap!
         try:
             mtime = Path(new_path).stat().st_mtime
         except OSError:
@@ -258,7 +225,6 @@ class VaultWatcher(FileSystemEventHandler):
                     for target_path in resolved:
                         self.graph_store.add_edge(path, target_path, ambiguous_link=ambiguous)
 
-    # Watchdog Handlers
     def on_created(self, event: FileSystemEvent) -> None:
         if not event.is_directory and event.src_path.endswith(".md"):
             self.event_queue.put((time.time(), event))
@@ -294,11 +260,9 @@ class VaultWatcher(FileSystemEventHandler):
         pending_events: dict[str, tuple[float, FileSystemEvent]] = {}
 
         while not self.stop_event.is_set():
-            # 1. Pull events from queue and populate pending events dict
             try:
                 while True:
                     timestamp, event = self.event_queue.get_nowait()
-                    # Keep only the latest event for each file path
                     path = event.src_path
                     if isinstance(event, FileMovedEvent):
                         path = event.dest_path
@@ -306,7 +270,6 @@ class VaultWatcher(FileSystemEventHandler):
             except queue.Empty:
                 pass
 
-            # 2. Process debounced events
             now = time.time()
             keys_to_remove = []
             for path, (timestamp, event) in list(pending_events.items()):
