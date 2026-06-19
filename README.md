@@ -71,8 +71,35 @@ graph TD
 - **Ollama** installed locally (Optional, but required for generative synthesis)
 
 ### 2. Installation
-Clone the repository and install using `uv` (recommended) or `pip`:
 
+#### Option A: Global CLI Install via `pipx` (Recommended)
+This installs SentinelRAG globally in an isolated environment so you can run it from any directory on your device:
+
+```bash
+# 1. Install pipx and update system PATH
+pip install pipx
+pipx ensurepath
+
+# 2. Install SentinelRAG globally from your local clone
+pipx install C:/Users/codex/GitHub/RAG
+```
+
+#### Option B: Global CLI Install via standard `pip`
+To install for your current user profile:
+
+```bash
+# 1. Install globally in editable mode
+pip install --user -e C:/Users/codex/GitHub/RAG
+```
+
+If the command is not recognized, add the Python scripts directory to your system `PATH`:
+- **Windows PowerShell**:
+  ```powershell
+  [Environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:APPDATA\Python\Python314\Scripts", "User")
+  ```
+  *(Note: Adjust `Python314` to your installed Python version if necessary.)*
+
+#### Option C: Local Development with `uv`
 ```bash
 git clone https://github.com/CODExGAMERZ/SentinelRAG.git
 cd SentinelRAG
@@ -80,20 +107,20 @@ uv pip install -e .
 ```
 
 ### 3. Basic Usage Flow
-Initialize settings, ingest your Markdown vault, and run a query:
+Once installed, you can call the command from any folder:
 
 ```bash
 # 1. Profile hardware and generate default configuration
-uv run sentinelrag profile
+sentinelrag profile
 
 # 2. Setup Ollama (downloads client if missing and pulls model)
-uv run sentinelrag setup-ollama --install --pull-model
+sentinelrag setup-ollama --install --pull-model
 
 # 3. Ingest your vault directory (e.g. storage_vault)
-uv run sentinelrag ingest storage_vault --reset
+sentinelrag ingest storage_vault --reset
 
 # 4. Ask a question
-uv run sentinelrag ask "What is Qwen3?"
+sentinelrag ask "What is Qwen3?"
 ```
 
 ---
