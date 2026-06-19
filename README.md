@@ -106,7 +106,7 @@ pip install pipx
 pipx ensurepath
 
 # 2. Install SentinelRAG globally from your local clone
-pipx install C:/Users/codex/GitHub/RAG
+pipx install /path/to/SentinelRAG
 ```
 
 ### Option B: Global CLI Install via standard `pip`
@@ -114,7 +114,7 @@ To install for your current user profile:
 
 ```bash
 # 1. Install globally in editable mode
-pip install --user -e C:/Users/codex/GitHub/RAG
+pip install --user -e /path/to/SentinelRAG
 ```
 
 If the command is not recognized, add the Python scripts directory to your system `PATH`:
@@ -250,7 +250,7 @@ Authorization: Bearer <YOUR_API_TOKEN>
   * **Payload**:
     ```json
     {
-      "path": "C:/Users/codex/GitHub/RAG/storage_vault",
+      "path": "/path/to/obsidian_vault",
       "reset": false,
       "force": false
     }
