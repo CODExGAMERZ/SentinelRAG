@@ -80,7 +80,7 @@ def _ram_info() -> tuple[float, float]:
 
 def _nvidia_gpus() -> list[GpuInfo]:
     try:
-        import pynvml  # type: ignore
+        import pynvml
 
         pynvml.nvmlInit()
         gpus: list[GpuInfo] = []
@@ -102,7 +102,36 @@ def _nvidia_gpus() -> list[GpuInfo]:
         pynvml.nvmlShutdown()
         return gpus
     except Exception:
-        return []
+        pass
+
+    try:
+        if shutil.which("nvidia-smi"):
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if result.returncode == 0:
+                smi_gpus = []
+                for line in result.stdout.strip().splitlines():
+                    parts = [p.strip() for p in line.split(",")]
+                    if len(parts) >= 3:
+                        smi_gpus.append(
+                            GpuInfo(
+                                vendor="nvidia",
+                                name=parts[0],
+                                total_gb=round(float(parts[1]) / 1024.0, 2),
+                                free_gb=round(float(parts[2]) / 1024.0, 2),
+                                available=True,
+                            )
+                        )
+                return smi_gpus
+    except Exception:
+        pass
+
+    return []
 
 
 def _rocm_available() -> bool:
