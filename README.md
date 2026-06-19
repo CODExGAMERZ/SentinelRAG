@@ -77,6 +77,16 @@ graph TD
     end
 ```
 
+### 🎯 Hardware Tier Mapping
+
+To optimize local inference latency and token-throughput, SentinelRAG dynamically configures an agent topology and recommends an optimal local model based on your profiled hardware:
+
+| Tier | Minimum Hardware Criteria | Recommended Model | Context Size (`num_ctx`) | LangGraph Agent Topology |
+| :--- | :--- | :--- | :--- | :--- |
+| **Tier A** (High) | VRAM $\ge$ 12GB or Apple Unified Memory $\ge$ 32GB | `qwen2.5:14b` | 8192 | **Full** (Planner $\rightarrow$ Retriever $\rightarrow$ Validator $\rightarrow$ Critic $\rightarrow$ Synthesizer) |
+| **Tier B** (Mid) | VRAM $\ge$ 6GB, System RAM $\ge$ 16GB, or Apple Unified Memory $\ge$ 16GB | `qwen2.5:7b` | 8192 | **Collapsed** (Validator and Critic combined into a single pass) |
+| **Tier C** (Low) | All other configurations / CPU-only | `qwen2.5:3b` | 4096 | **Minimal** (Linear Retriever $\rightarrow$ Merger $\rightarrow$ Synthesizer pipeline) |
+
 ---
 
 ## ✨ Features
