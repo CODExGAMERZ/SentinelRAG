@@ -68,7 +68,17 @@ class VaultWatcher(FileSystemEventHandler):
             logger.info("VectorStore is empty or force sync requested. Forcing full sync of all files.")
             db_files = {}
 
-        deleted_files = set(db_files.keys()) - set(current_files.keys())
+        # Only check for deletions among files that are inside self.vault_path
+        db_files_in_vault = {}
+        for path_str, mtime in db_files.items():
+            try:
+                p = Path(path_str)
+                if p.is_relative_to(self.vault_path):
+                    db_files_in_vault[path_str] = mtime
+            except Exception:
+                pass
+
+        deleted_files = set(db_files_in_vault.keys()) - set(current_files.keys())
         modified_files = []
         new_files = []
 

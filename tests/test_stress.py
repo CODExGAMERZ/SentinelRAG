@@ -80,3 +80,40 @@ def test_empty_vector_store_force_sync(tmp_path: Path) -> None:
     assert vector_store.count() == blocks_count  # Should be successfully re-upserted
 
     vector_store.close()
+
+
+def test_delta_sync_ignores_outside_vault(tmp_path: Path) -> None:
+    vault_a = tmp_path / "vault_a"
+    vault_b = tmp_path / "vault_b"
+    vault_a.mkdir()
+    vault_b.mkdir()
+
+    note_a = vault_a / "note_a.md"
+    note_a.write_text("# Note A\nHello from A", encoding="utf-8")
+    note_b = vault_b / "note_b.md"
+    note_b.write_text("# Note B\nHello from B", encoding="utf-8")
+
+    vector_store = VectorStore(tmp_path, "test-multi-sync")
+    graph_store = GraphStore(tmp_path, "test_multi_sync.db")
+
+    vector_store.reset()
+    graph_store.reset()
+
+    from sentinelrag.config import load_config
+    config = load_config()
+    from sentinelrag.obsidian.watcher import VaultWatcher
+
+    # Ingest vault_a
+    watcher_a = VaultWatcher(vault_a, config, vector_store, graph_store)
+    watcher_a.sync_all()
+
+    # Ingest vault_b using the same stores
+    watcher_b = VaultWatcher(vault_b, config, vector_store, graph_store)
+    watcher_b.sync_all()
+
+    # Verify that note_a was NOT deleted from the database and note_b was added
+    note_mtimes = graph_store.get_note_mtimes()
+    assert str(note_a.resolve()) in note_mtimes
+    assert str(note_b.resolve()) in note_mtimes
+
+    vector_store.close()

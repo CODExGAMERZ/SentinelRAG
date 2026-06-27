@@ -188,6 +188,10 @@ Checks local Ollama server connectivity, installs it if missing, and downloads t
 
 ### 3. `ingest`
 Parses and indexes an Obsidian vault directory into your local databases.
+
+> [!NOTE]
+> The startup delta sync is scoped specifically to the target `<path>` directory. This ensures that ingesting or syncing one vault will not delete or clean up indexed notes belonging to other vaults/directories stored in the same shared SQLite database.
+
 * **Usage**: `sentinelrag ingest <path> [options]`
 * **Arguments**:
   * `<path>`: The absolute or relative path to the Obsidian Markdown Vault folder.
